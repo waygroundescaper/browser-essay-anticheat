@@ -44,7 +44,7 @@ All detected events are appended to the **final PDF** for instructor review.
 
 ## 🚀 How to Use
 
-1. Open `index.html` in a modern browser
+1. Open `website.html` in a modern browser
 2. Click *[Start  Test]*
 3. Click **[Start AntiCheat]**
 4. Enter fullscreen and begin writing
