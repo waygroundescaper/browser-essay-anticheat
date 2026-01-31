@@ -4,6 +4,7 @@ A *browser-based, offline essay exam system* designed to reduce cheating during 
 
 This project runs entirely in the browser and **does not require any backend or internet connection** once loaded.
 
+**IMPORTANT: THIS PROGRAM HAD A BUG, WHEN STUDENT START ANTICHEAT IT WILL SHOW AN ANTICHEAT WARNING FOR 1 TIME. IGNORE IT, THIS IS A FALSE WARNING (over 1 time than its a true AntiCheat warning) **
 ---
 
 ## ✨ Features
