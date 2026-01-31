@@ -1,0 +1,732 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Essay exam watcher</title>
+  <script src="./jspdf.umd.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      height: 100vh;
+      font-family: 'Courier New', monospace;
+      background-color: black;
+      color: white;
+      text-align: left;
+      user-select: none;
+      overflow: hidden;
+    }
+    #essayBox {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 32vh;
+      background: rgba(0,0,0,0.96);
+      border-top: 2px solid #333;
+      padding: 10px 12px;
+      z-index: 9;
+    }
+
+    #essayTitle {
+      font-size: 12px;
+      color: #9a9a9a;
+      margin-bottom: 8px;
+      user-select: none;
+    }
+
+    #essayInput {
+      width: 100%;
+      height: calc(100% - 22px);
+      resize: none;
+      background: transparent;
+      color: #eaeaea;
+      border: 0;
+      outline: none;
+      font-family: 'Courier New', monospace;
+      font-size: 16px;
+      line-height: 1.55;
+      user-select: text;
+      -webkit-user-select: text;
+    }
+
+    #header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      background-color: #222;
+      color: white;
+      padding: 10px;
+      font-size: 1.2rem;
+      z-index: 10;
+      font-family: 'Courier New', monospace;
+      border-bottom: 2px solid white;
+      text-align: center;
+      display: flex;
+      justify-content: space-around;
+      flex-wrap: wrap;
+    }
+    .status-item { margin: 0 5px; }
+    #log {
+      font-size: 1rem;
+      color: white;
+      background-color: #111;
+      padding: 1rem;
+      width: 100%;
+      height: calc(100vh - 60px);
+      text-align: left;
+      margin-top: 60px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      font-family: 'Courier New', monospace;
+    }
+    .shell-command {
+      color: yellow;
+      margin-top: 20px;
+      font-size: 1.2rem;
+    }
+    #fsButton {
+      font-size: 1.2rem;
+      color: #00aaff;
+      text-decoration: none;
+      cursor: pointer;
+      display: inline-block;
+    }
+    .timestamp { color: white; }
+    .message { color: white; }
+    .count { color: gray; }
+    .ok .message { color: green; }
+    .bad .message { color: red; }
+    .info .message { color: cyan; }
+    .warn .message { color: yellow; }
+    .permission-error .message { color: yellow; }
+    .true { color: green; }
+    .false { color: red; }
+    #cursor {
+      display: inline-block;
+      width: 0.6em;
+      height: 1.2em;
+      background-color: white;
+      animation: blink 1s step-start infinite;
+      margin-left: 5px;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+  </style>
+</head>
+
+<body>
+  <div id="header">
+    <span id="startButton" style="color:#00ff88;cursor:pointer;">[Start AntiCheat]</span>
+    <span class="status-item">Essay test system</span>
+    <span class="status-item">Fullscreen Event: <span id="fullscreen-event">FALSE</span></span>
+    <span class="status-item">Fullscreen Prop: <span id="fullscreen-prop">FALSE</span></span>
+    <span class="status-item">Focus Event: <span id="focus-event">FALSE</span></span>
+    <span class="status-item">Focus Prop: <span id="focus-prop">FALSE</span></span>
+    <span class="status-item">Visibility Event: <span id="visibility-event">FALSE</span></span>
+    <span class="status-item">Visibility Prop: <span id="visibility-prop">FALSE</span></span>
+    <span id="downloadButton" style="color:#00aaff;cursor:pointer;">[End Test]</span>
+    <span id="fsButton">[Start TEST]</span>
+  </div>
+
+  <pre id="log"></pre>
+  <div class="shell-command">user@anticheat:~$ Enter Fullscreen to Begin Test<span id="cursor"></span></div>
+
+  <script>
+    (function() {
+      const fullscreenEvent = document.getElementById('fullscreen-event');
+      const fullscreenProp = document.getElementById('fullscreen-prop');
+      const focusEvent = document.getElementById('focus-event');
+      const focusProp = document.getElementById('focus-prop');
+      const visibilityEvent = document.getElementById('visibility-event');
+      const visibilityProp = document.getElementById('visibility-prop');
+      const logEl = document.getElementById('log');
+      const fsButton = document.getElementById('fsButton');
+      const startButton = document.getElementById('startButton');
+      const downloadButton = document.getElementById('downloadButton');
+
+      let antiCheatEnabled = false;
+
+      let state = {
+        focused: document.hasFocus(),
+        fullscreen: !!document.fullscreenElement,
+        visible: document.visibilityState === 'visible',
+        innerWidth: window.innerWidth,
+        innerHeight: window.innerHeight
+      };
+
+      let isTransitioning = false;
+      const expectedHasFocus = 'function hasFocus() { [native code] }';
+
+      let incidentLog = [];
+      const SAVE_KEY = 'essay_exam_state_v1';
+
+      function getEssayInput() {
+        return document.getElementById('essayInput');
+      }
+
+      function safeUUID() {
+        try {
+          if (window.crypto && typeof window.crypto.randomUUID === 'function') return window.crypto.randomUUID();
+        } catch (e) {}
+        return 'id-' + Math.random().toString(16).slice(2) + '-' + Date.now();
+      }
+
+      function saveExamState(extra = {}) {
+        try {
+          const payload = {
+            antiCheatEnabled,
+            isTransitioning,
+            state,
+            essayText: (getEssayInput()?.value || ''),
+            incidentLog,
+            startedAt: window.__startedAt || null,
+            collected: window.__collected || false,
+            ...extra
+          };
+          localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
+        } catch (e) {}
+      }
+
+      function loadExamState() {
+        try {
+          const raw = localStorage.getItem(SAVE_KEY);
+          if (!raw) return null;
+          return JSON.parse(raw);
+        } catch (e) {
+          return null;
+        }
+      }
+
+      function navType() {
+        try {
+          const n = performance.getEntriesByType('navigation')[0];
+          return (n && n.type) ? n.type : 'unknown';
+        } catch (e) {
+          return 'unknown';
+        }
+      }
+
+      function shouldRecordIncident(msg, className = '') {
+        const m = String(msg).toLowerCase();
+        return (
+          m.includes('focus gained') ||
+          m.includes('focus lost') ||
+          m.includes('exited fullscreen') ||
+          m.includes('window resized') ||
+          m.includes('[suspicious activity]') ||
+          m.includes('anticheat spoof detected') ||
+          m.includes('cheat blocked') ||
+          m.includes('tampering detected') ||
+          m.includes('impossible state') ||
+          m.includes('suspicious') ||
+          m.includes('page reloaded') ||
+          m.includes('reload') ||
+          m.includes('unload / refresh') ||
+          className === 'bad'
+        );
+      }
+
+      function recordIncident(timestamp, msg) {
+        incidentLog.push(`${timestamp} ${msg}`);
+        if (incidentLog.length > 300) incidentLog.shift();
+      }
+
+      function createLogLine(timestamp, msg, countText, className) {
+        const logLine = document.createElement('div');
+        logLine.className = className;
+
+        const timestampSpan = document.createElement('span');
+        timestampSpan.className = 'timestamp';
+        timestampSpan.textContent = timestamp + ' ';
+
+        const messageSpan = document.createElement('span');
+        messageSpan.className = 'message';
+        messageSpan.textContent = msg;
+
+        const countSpan = document.createElement('span');
+        countSpan.className = 'count';
+        countSpan.textContent = countText;
+
+        logLine.appendChild(timestampSpan);
+        logLine.appendChild(messageSpan);
+        logLine.appendChild(countSpan);
+        logLine.appendChild(document.createTextNode('\n'));
+
+        if (msg.includes('permission') || msg.includes('failed')) {
+          logLine.classList.add('permission-error');
+        }
+        return logLine;
+      }
+
+      function log(msg, className = '') {
+        const time = new Date().toLocaleTimeString();
+        const timestamp = `[${time}]`;
+
+        if (shouldRecordIncident(msg, className)) {
+          recordIncident(timestamp, msg);
+          saveExamState();
+        }
+
+        let mergeWithIndex = -1;
+        for (let i = logEl.children.length - 1; i >= 0; i--) {
+          const child = logEl.children[i];
+          const messageSpan = child.querySelector('.message');
+          if (messageSpan && messageSpan.textContent === msg) {
+            const distance = logEl.children.length - i;
+            if (distance <= 8) mergeWithIndex = i;
+            break;
+          }
+        }
+
+        let countText = '';
+        let logLine;
+        if (mergeWithIndex !== -1) {
+          const oldChild = logEl.children[mergeWithIndex];
+          const oldCountSpan = oldChild.querySelector('.count');
+          const oldText = oldCountSpan.textContent.trim();
+          let oldCount = 1;
+          if (oldText) {
+            const match = oldText.match(/\[x(\d+)\]/);
+            if (match) oldCount = parseInt(match[1], 10);
+          }
+          const newCount = oldCount + 1;
+          countText = ` [x${newCount}]`;
+
+          if (mergeWithIndex === logEl.children.length - 1) {
+            oldChild.querySelector('.timestamp').textContent = timestamp + ' ';
+            oldChild.querySelector('.count').textContent = countText;
+            if (msg.includes('permission') || msg.includes('failed')) {
+              oldChild.classList.add('permission-error');
+            }
+            logLine = oldChild;
+          } else {
+            logEl.removeChild(oldChild);
+            logLine = createLogLine(timestamp, msg, countText, className);
+            logEl.appendChild(logLine);
+          }
+        } else {
+          logLine = createLogLine(timestamp, msg, countText, className);
+          logEl.appendChild(logLine);
+        }
+
+        logEl.scrollTop = logEl.scrollHeight;
+        while (logEl.children.length > 100) logEl.removeChild(logEl.firstChild);
+      }
+
+      function render() {
+        fullscreenEvent.textContent = state.fullscreen ? 'TRUE' : 'FALSE';
+        fullscreenEvent.className = state.fullscreen ? 'true' : 'false';
+
+        focusEvent.textContent = state.focused ? 'TRUE' : 'FALSE';
+        focusEvent.className = state.focused ? 'true' : 'false';
+
+        visibilityEvent.textContent = state.visible ? 'TRUE' : 'FALSE';
+        visibilityEvent.className = state.visible ? 'true' : 'false';
+
+        const currentFullscreen = !!document.fullscreenElement;
+        fullscreenProp.textContent = currentFullscreen ? 'TRUE' : 'FALSE';
+        fullscreenProp.className = currentFullscreen ? 'true' : 'false';
+
+        const currentFocused = document.hasFocus();
+        focusProp.textContent = currentFocused ? 'TRUE' : 'FALSE';
+        focusProp.className = currentFocused ? 'true' : 'false';
+
+        const currentVisible = document.visibilityState === 'visible';
+        visibilityProp.textContent = currentVisible ? 'TRUE' : 'FALSE';
+        visibilityProp.className = currentVisible ? 'true' : 'false';
+      }
+
+      async function enterFullscreen() {
+        isTransitioning = true;
+        try {
+          if (!document.fullscreenElement) {
+            await document.documentElement.requestFullscreen();
+            log('Entered fullscreen', 'ok');
+          }
+        } catch (e) {
+          log('Fullscreen request failed: ' + e.message, 'warn');
+        } finally {
+          setTimeout(() => { isTransitioning = false; }, 1000);
+          saveExamState();
+        }
+      }
+
+      function detectSpoof(type, event = null) {
+        if (!antiCheatEnabled) return;
+        if (event && !event.isTrusted) {
+          log(`ANTICHEAT SPOOF DETECTED [Untrusted Event: ${type}]`, 'bad');
+        } else {
+          log(`ANTICHEAT SPOOF DETECTED [${type}]`, 'bad');
+        }
+      }
+
+      function stopAntiCheat(reason = 'Stopped') {
+        antiCheatEnabled = false;
+        isTransitioning = true;
+        setTimeout(() => { isTransitioning = false; }, 300);
+        log(`Test stopped: ${reason}`, 'info');
+
+        startButton.textContent = '[Start AntiCheat]';
+        startButton.style.color = '#00ff88';
+        startButton.style.cursor = 'pointer';
+
+        saveExamState();
+      }
+
+      async function downloadEssayPDF() {
+        // jsPDF must exist (local file: ./jspdf.umd.min.js)
+        if (!window.jspdf || !window.jspdf.jsPDF) {
+          log('PDF export failed: jsPDF not loaded (check ./jspdf.umd.min.js)', 'bad');
+          return;
+        }
+
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+
+        const essayText = (getEssayInput()?.value || '').replace(/\r\n/g, '\n');
+        const marginX = 40;
+        let y = 60;
+
+        doc.setFont('Courier', 'normal');
+        doc.setFontSize(11);
+
+        const lines = doc.splitTextToSize(essayText || '(empty)', 520);
+        lines.forEach(line => {
+          if (y > 780) { doc.addPage(); y = 60; }
+          doc.text(line, marginX, y);
+          y += 14;
+        });
+
+        // Proctor report page
+        doc.addPage();
+        y = 80;
+
+        doc.setFontSize(14);
+        doc.text('PROCTOR REPORT', marginX, y);
+        y += 30;
+
+        doc.setFontSize(10);
+
+        const meta = [
+          `Collected At: ${new Date().toLocaleString()}`,
+          `Started At: ${window.__startedAt ? new Date(window.__startedAt).toLocaleString() : 'N/A'}`,
+          `Nav Type: ${navType()}`,
+          `Focused: ${document.hasFocus()}`,
+          `Fullscreen: ${!!document.fullscreenElement}`,
+          `Visibility: ${document.visibilityState}`,
+          `Screen Size: ${window.innerWidth} x ${window.innerHeight}`,
+          '',
+          'Incident Log:'
+        ];
+
+        meta.forEach(line => {
+          doc.text(line, marginX, y);
+          y += 14;
+        });
+
+        if (incidentLog.length === 0) {
+          doc.text('No incidents detected.', marginX, y);
+          y += 14;
+        } else {
+          incidentLog.forEach(line => {
+            if (y > 780) { doc.addPage(); y = 60; }
+            doc.text(line, marginX, y);
+            y += 12;
+          });
+        }
+
+        // Integrity stamp
+        y += 24;
+        doc.setFontSize(9);
+        doc.text(`Integrity-ID: ${safeUUID()}`, marginX, y);
+
+        doc.save(`essay_${Date.now()}.pdf`);
+        log('PDF exported', 'ok');
+      }
+
+
+      startButton.addEventListener('click', async () => {
+        if (antiCheatEnabled) return;
+
+        antiCheatEnabled = true;
+        window.__startedAt = new Date().toISOString();
+        window.__collected = false;
+
+        startButton.textContent = '[AntiCheat Running]';
+        startButton.style.color = '#888';
+        startButton.style.cursor = 'default';
+
+        log('AntiCheat system initialized', 'info');
+
+        await enterFullscreen();
+        render();
+
+        const input = getEssayInput();
+        if (input) input.focus();
+
+        saveExamState({ startedAt: window.__startedAt, antiCheatEnabled: true });
+      });
+
+      // ===============================
+      // End Test button (export PDF)
+      // ===============================
+      downloadButton.addEventListener('click', async () => {
+        if (!antiCheatEnabled) {
+          log('End ignored: AntiCheat not running', 'warn');
+          return;
+        }
+
+        window.__collected = true;
+        stopAntiCheat('Collected');
+
+        await downloadEssayPDF();
+
+        const input = getEssayInput();
+        if (input) {
+          input.readOnly = true;
+          input.blur();
+        }
+
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(() => {});
+        }
+
+        saveExamState({ collected: true, antiCheatEnabled: false });
+      });
+
+      // ===== Restrictions =====
+      window.addEventListener('contextmenu', (e) => {
+        if (!antiCheatEnabled) return;
+        if (e.target && e.target.closest && e.target.closest('#essayBox')) return;
+        if (!e.isTrusted) detectSpoof('Contextmenu', e);
+        e.preventDefault();
+        log('Right-click blocked', 'warn');
+      });
+
+      window.addEventListener('copy', (e) => {
+        if (!antiCheatEnabled) return;
+        if (!e.isTrusted) detectSpoof('Copy', e);
+        e.preventDefault();
+        log('Copy blocked', 'warn');
+      });
+
+      window.addEventListener('cut', (e) => {
+        if (!antiCheatEnabled) return;
+        if (!e.isTrusted) detectSpoof('Cut', e);
+        e.preventDefault();
+        log('Cut blocked', 'warn');
+      });
+
+      window.addEventListener('paste', (e) => {
+        if (!antiCheatEnabled) return;
+        if (!e.isTrusted) detectSpoof('Paste', e);
+        e.preventDefault();
+        log('[CHEAT BLOCKED!] Paste blocked', 'bad');
+      });
+
+      document.addEventListener('selectstart', (e) => {
+        if (!antiCheatEnabled) return;
+        if (e.target && e.target.closest && e.target.closest('#essayBox')) return;
+        if (!e.isTrusted) detectSpoof('Selectstart', e);
+        e.preventDefault();
+        log('Text selection start blocked', 'warn');
+      });
+
+      document.addEventListener('dragstart', (e) => {
+        if (!antiCheatEnabled) return;
+        if (e.target && e.target.closest && e.target.closest('#essayBox')) return;
+        if (!e.isTrusted) detectSpoof('Dragstart', e);
+        e.preventDefault();
+        log('Drag start blocked', 'warn');
+      });
+
+      window.addEventListener('keydown', (e) => {
+        if (!antiCheatEnabled) return;
+        if (!e.isTrusted) detectSpoof('Keydown', e);
+
+        const key = (e.key || '').toLowerCase();
+
+        const isRefresh =
+          key === 'f5' ||
+          ((e.ctrlKey || e.metaKey) && (key === 'r')) ||
+          ((e.ctrlKey || e.metaKey) && e.shiftKey && (key === 'r'));
+
+        if (isRefresh) {
+          e.preventDefault();
+          log('[Suspicious Activity] Refresh shortcut blocked', 'warn');
+          return;
+        }
+
+        if ((e.ctrlKey || e.metaKey) && (key === 'c' || key === 'x' || key === 'v')) {
+          e.preventDefault();
+          log(`${key.toUpperCase()} blocked`, 'warn');
+        }
+
+        if (key === 'escape' || key === 'esc') {
+          isTransitioning = true;
+          setTimeout(() => { isTransitioning = false; }, 1000);
+        }
+      });
+
+      // ===== State Events =====
+      window.addEventListener('focus', (event) => {
+        if (!antiCheatEnabled) return;
+        if (!event.isTrusted) detectSpoof('Focus', event);
+        state.focused = true;
+        render();
+        log('Focus gained, student had reenter the tab', 'bad');
+      });
+
+      window.addEventListener('blur', (event) => {
+        if (!antiCheatEnabled) return;
+        if (!event.isTrusted) detectSpoof('Blur', event);
+        state.focused = false;
+        render();
+        log('Focus lost, *The student had leave the tab*', 'bad');
+      });
+
+      document.addEventListener('visibilitychange', (event) => {
+        if (!antiCheatEnabled) return;
+        if (!event.isTrusted) detectSpoof('Visibilitychange', event);
+        state.visible = document.visibilityState === 'visible';
+        render();
+        log(`Visibility changed to ${state.visible ? 'visible' : 'hidden'}`, 'info');
+      });
+
+      window.addEventListener('resize', (event) => {
+        if (!antiCheatEnabled) return;
+        if (!event.isTrusted) detectSpoof('Resize', event);
+
+        const newWidth = window.innerWidth;
+        const newHeight = window.innerHeight;
+        if (newWidth !== state.innerWidth || newHeight !== state.innerHeight) {
+          log(`[Suspicious Activity] Window resized from ${state.innerWidth}x${state.innerHeight} to ${newWidth}x${newHeight}`, 'warn');
+          state.innerWidth = newWidth;
+          state.innerHeight = newHeight;
+          saveExamState();
+        }
+      });
+
+      window.addEventListener('beforeprint', (e) => {
+        if (!antiCheatEnabled) return;
+        if (!e.isTrusted) detectSpoof('Beforeprint', e);
+        e.preventDefault();
+        log('Print attempt blocked', 'warn');
+      });
+
+      window.addEventListener('beforeunload', (e) => {
+        if (!antiCheatEnabled) return;
+        log(`Unload / refresh attempt detected (nav=${navType()})`, 'warn');
+        saveExamState();
+        e.returnValue = 'Are you sure you want to leave?';
+      });
+
+      fsButton.addEventListener('click', async () => {
+        if (!document.fullscreenElement) {
+          try {
+            await document.documentElement.requestFullscreen();
+            log('Entered fullscreen (direct click)', 'ok');
+          } catch (e) {
+            log('Fullscreen failed: ' + e.message, 'warn');
+          }
+        } else {
+          document.exitFullscreen().catch(() => {});
+        }
+      });
+
+      document.addEventListener('fullscreenchange', async (event) => {
+        const isFs = !!document.fullscreenElement;
+
+        state.fullscreen = isFs;
+        render();
+
+        fsButton.textContent = isFs ? '[Exit Fullscreen]' : '[Enter Fullscreen]';
+
+        if (!antiCheatEnabled) {
+          saveExamState();
+          return;
+        }
+
+        if (!event.isTrusted) {
+          detectSpoof('Fullscreenchange', event);
+        }
+
+        if (!isFs && !isTransitioning) {
+          log('Exited fullscreen → Force re-enter', 'warn');
+          await enterFullscreen();
+        } else if (isFs) {
+          log('Fullscreen active', 'info');
+        }
+
+        saveExamState();
+      });
+
+      setInterval(() => {
+        if (!antiCheatEnabled) return;
+
+        const currentFocused = document.hasFocus();
+        const currentFullscreen = !!document.fullscreenElement;
+        const currentVisible = document.visibilityState === 'visible';
+
+        if (state.focused !== currentFocused && !isTransitioning) {
+          detectSpoof('Focus Inconsistency');
+          state.focused = currentFocused;
+          log('Focus state inconsistency detected and corrected', 'warn');
+        }
+        if (state.fullscreen !== currentFullscreen && !isTransitioning) {
+          detectSpoof('Fullscreen Inconsistency');
+          state.fullscreen = currentFullscreen;
+          log('Fullscreen state inconsistency detected and corrected', 'warn');
+        }
+        if (state.visible !== currentVisible && !isTransitioning) {
+          detectSpoof('Visibility Inconsistency');
+          state.visible = currentVisible;
+          log('Visibility state inconsistency detected and corrected', 'warn');
+        }
+        if (!currentVisible && currentFocused && !isTransitioning) {
+          detectSpoof('Visibility-Focus Mismatch');
+          log('Impossible state: Focused but not visible', 'bad');
+        }
+        if (document.hasFocus.toString() !== expectedHasFocus) {
+          detectSpoof('hasFocus Tamper');
+          log('Tampering detected in document.hasFocus', 'bad');
+        }
+
+        render();
+      }, 500);
+
+      const input = getEssayInput();
+      if (input) {
+        input.addEventListener('input', () => saveExamState());
+      }
+      setInterval(() => saveExamState(), 1500);
+
+      const restored = loadExamState();
+      if (restored && typeof restored === 'object') {
+        try {
+          if (getEssayInput()) getEssayInput().value = restored.essayText || '';
+          incidentLog = Array.isArray(restored.incidentLog) ? restored.incidentLog : [];
+          window.__startedAt = restored.startedAt || null;
+          window.__collected = !!restored.collected;
+
+          const ntype = navType();
+          if (ntype === 'reload' || ntype === 'back_forward') {
+            log(`[Suspicious Activity] Page reloaded (nav=${ntype})`, 'bad');
+          }
+
+          saveExamState();
+        } catch (e) {}
+      }
+
+      render();
+      saveExamState();
+    })();
+  </script>
+
+  <div id="essayBox">
+    <div id="essayTitle">Type up essay - ANTICHEAT SYSTEM </div>
+    <textarea id="essayInput" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+  </div>
+
+</body>
+</html>
